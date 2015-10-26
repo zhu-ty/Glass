@@ -19,7 +19,7 @@ class ImageDisplayerImpl
 public:
 	struct Dthread
 	{
-		IplImage *p;
+		IplImage **p;
 		bool stop;
 		string name;
 		mutex lock;
@@ -35,10 +35,17 @@ namespace thread
 	DWORD WINAPI Displayimg(LPVOID lpParamter)
 	{
 		ImageDisplayerImpl::Dthread *dp = (ImageDisplayerImpl::Dthread *)lpParamter;
-		IplImage *pth = dp->p;
 		while (1)
 		{
-			cvShowImage(dp->name.c_str(), pth);
+			try
+			{
+				IplImage *pth = *(dp->p);
+				cvShowImage(dp->name.c_str(), pth);
+				cvResizeWindow(dp->name.c_str(), pth->width, pth->height);
+			}
+			catch (...)
+			{
+			}
 			cvWaitKey(1000);
 			dp->lock.lock();
 			if (dp->stop == true)
@@ -66,12 +73,12 @@ ImageDisplayer::~ImageDisplayer()
 	delete _impl;
 }
 
-void ImageDisplayer::display(IplImage *p)
+void ImageDisplayer::display(IplImage **p)
 {
 	display(p, "Image");
 }
 
-void ImageDisplayer::display(IplImage *p, const char *name)
+void ImageDisplayer::display(IplImage **p, const char *name)
 {
 	if (_impl->shown == false)
 	{

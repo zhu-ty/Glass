@@ -33,10 +33,18 @@ public:
 	void dilate();
 	void count();
 
+	bool hasnear(uchar num, int x, int y);
+	void setwindow(IplImage *p, uchar num, int x, int y);
+	int searchnear(int x, int y,int llable,uchar *lable);
+
 	IplImage *input = nullptr;
 	ImageDisplayer idis;
 	int whites;
 	int fulls;
+	const int threshold = 230;
+	const int thresholdwhite = 1000;
+	const int windowsize = 5;
+	const int maxbottle = 50;
 };
 
 CommandHandler::CommandHandler()
@@ -185,7 +193,7 @@ void CommandHandlerImpl::save(string s)
 void CommandHandlerImpl::display(string s)
 {
 	if(input != nullptr)
-		idis.display(input,s.c_str());
+		idis.display(&input,s.c_str());
 }
 void CommandHandlerImpl::hide()
 {
@@ -193,9 +201,9 @@ void CommandHandlerImpl::hide()
 }
 void CommandHandlerImpl::exit()
 {
+	hide();
 	printf("See you next time!\n");
 }
-
 void CommandHandlerImpl::calculate()
 {
 	if (input == nullptr)
@@ -213,27 +221,130 @@ void CommandHandlerImpl::calculate()
 
 void CommandHandlerImpl::togray()
 {
-	IplImage *p;
-	p = cvCreateImage(cvSize(input->width, input->height), input->depth, 1);
-	for (int i = 0; i < input->height; i++)
+	if (input->nChannels == 3)
 	{
-		uchar *pixel = (uchar *)input->imageData + i * input->widthStep;
-		uchar *pixelp = (uchar *)p->imageData + i * p->widthStep;
-		for (int j = 0; j < input->width; j++)
-			pixelp[3 * j] = (uchar)(0.144 * pixel[3 * j] + 0.587 * pixel[3 * j + 1] + 0.299 * pixel[3 * j + 2]);
+		IplImage *p, *q;
+		q = input;
+		p = cvCreateImage(cvSize(input->width, input->height), input->depth, 1);
+		for (int i = 0; i < input->height; i++)
+		{
+			uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
+			uchar *pixelp = (uchar *)(p->imageData + i * p->widthStep);
+			for (int j = 0; j < input->width; j++)
+				pixelp[j] = (uchar)(0.072169 * pixel[3 * j] + 0.715160 * pixel[3 * j + 1] + 0.212671 * pixel[3 * j + 2]);
+		}
+		input = p;
+		cvReleaseImage(&q);
 	}
-	cvReleaseImage(&input);
-	input = p;
 }
 void CommandHandlerImpl::binaryzation()
 {
+	for (int i = 0; i < input->height; i++)
+	{
+		uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
+		for (int j = 0; j < input->width; j++)
+			pixel[j] = (uchar)(pixel[j] > threshold ? 255 : 0);
+	}
+}
+bool CommandHandlerImpl::hasnear(uchar num,int x,int y)
+{
+	if (x > 0 && (((uchar *)(input->imageData + y * input->widthStep))[x - 1] == num))
+		return true;
+	else if (x < input->width - 1 && (((uchar *)(input->imageData + y * input->widthStep))[x + 1] == num))
+		return true;
+	else if (y > 0 && (((uchar *)(input->imageData + (y - 1) * input->widthStep))[x] == num))
+		return true;
+	else if (y < input->height - 1 && (((uchar *)(input->imageData + (y + 1) * input->widthStep))[x] == num))
+		return true;
+	return false;
+}
+void CommandHandlerImpl::setwindow(IplImage *p,uchar num, int x, int y)
+{
+	int c = windowsize / 2;
+	for (int i = y - c; i < y + c + 1; i++)
+		for (int j = x - c; j < x + c + 1; j++)
+			if (i >= 0 && i < p->height && j >= 0 && j < p->width)
+				((uchar *)(p->imageData + i * p->widthStep))[j] = num;
 }
 void CommandHandlerImpl::erode()
 {
+	IplImage *p, *q;
+	p = cvCloneImage(input);
+	q = input;
+	for (int i = 0; i < input->height; i++)
+	{
+		uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
+		uchar *pixelp = (uchar *)(p->imageData + i * p->widthStep);
+		for (int j = 0; j < input->width; j++)
+		{
+			if (pixel[j] == 0 && hasnear(255, j, i))
+				setwindow(p, 0, j, i);
+		}
+	}
+	input = p;
+	cvReleaseImage(&q);
 }
 void CommandHandlerImpl::dilate()
 {
+	IplImage *p, *q;
+	p = cvCloneImage(input);
+	q = input;
+	for (int i = 0; i < input->height; i++)
+	{
+		uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
+		uchar *pixelp = (uchar *)(p->imageData + i * p->widthStep);
+		for (int j = 0; j < input->width; j++)
+		{
+			if (pixel[j] == 255 && hasnear(0, j, i))
+				setwindow(p, 255, j, i);
+		}
+	}
+	input = p;
+	cvReleaseImage(&q);
 }
 void CommandHandlerImpl::count()
 {
+	int ext = input->width * input->height;
+	int llable = 1;
+	uchar *lable = new uchar[ext];
+	int *size = new int[maxbottle];
+	memset(size, 0, maxbottle * sizeof(int));
+	memset(lable, 0, ext * sizeof(uchar));
+	for (int i = 0; i < input->height; i++)
+	{
+		uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
+		for (int j = 0; j < input->width; j++)
+		{
+			if (lable[i * input->height + j] == 0 && pixel[j] == 255)
+			{
+				size[llable] += searchnear(j, i, llable, lable);
+				llable++;
+			}
+		}
+	}
+	whites = llable - 1;
+	fulls = whites;
+	for (int i = 0; i < llable; i++)
+		if (size[i] > thresholdwhite)
+			fulls--;
+	delete lable;
+	delete size;
+}
+int CommandHandlerImpl::searchnear(int x, int y, int llable, uchar *lable)
+{
+	int sum = 0;
+	if (y >= 0 && y < input->height && x >= 0 && x < input->width && ((uchar *)(input->imageData + y * input->widthStep))[x] == 255 && lable[y*input->height + x] == 0)
+	{
+		lable[y*input->height + x] = llable;
+		sum++;
+		sum += searchnear(x - 1, y - 1, llable, lable);
+		sum += searchnear(x + 0, y - 1, llable, lable);
+		sum += searchnear(x + 1, y - 1, llable, lable);
+		sum += searchnear(x - 1, y + 0, llable, lable);
+		sum += searchnear(x + 1, y + 0, llable, lable);
+		sum += searchnear(x - 1, y + 1, llable, lable);
+		sum += searchnear(x + 0, y + 1, llable, lable);
+		sum += searchnear(x + 1, y + 1, llable, lable);
+	}
+	return sum;
 }

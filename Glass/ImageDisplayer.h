@@ -19,8 +19,8 @@ class ImageDisplayer
 public:
 	ImageDisplayer();
 	~ImageDisplayer();
-	void display(IplImage *p);
-	void display(IplImage *p, const char *name);
+	void display(IplImage **p);
+	void display(IplImage **p, const char *name);
 	void hide();
 private:
 	class ImageDisplayerImpl *_impl;
