@@ -9,6 +9,7 @@
 #include "ImageDisplayer.h"
 #include <vector>
 #include <string>
+#define maxbottle 50
 
 class CommandHandlerImpl
 {
@@ -35,21 +36,25 @@ public:
 
 	bool hasnear(uchar num, int x, int y);
 	void setwindow(IplImage *p, uchar num, int x, int y);
-	int searchnear(int x, int y,int llable,uchar *lable);
+	int searchnear(int x, int y, int llable, uchar *lable, int *lower, int *xsum);
 
 	IplImage *input = nullptr;
 	ImageDisplayer idis;
-	int whites;
-	int fulls;
 	const int threshold = 230;
-	const int thresholdwhite = 1000;
+	const int thresholdwhite = 500;
 	const int windowsize = 5;
-	const int maxbottle = 50;
+	const int thresholdlow = 35;
+	int whites;
+	int fulls1,fulls2;
+	uchar emptybottles1[maxbottle];
+	uchar emptybottles2[maxbottle];
 };
 
 CommandHandler::CommandHandler()
 {
 	_impl = new CommandHandlerImpl();
+	memset(_impl->emptybottles1, 0, sizeof(_impl->emptybottles1));
+	memset(_impl->emptybottles2, 0, sizeof(_impl->emptybottles2));
 }
 CommandHandler::~CommandHandler()
 {
@@ -216,7 +221,18 @@ void CommandHandlerImpl::calculate()
 	dilate();
 	count();
 
-	printf("Bottles:%d,Full bottles:%d\n", whites, fulls);
+	printf("Counted by area size:\n");
+	printf("Bottles:%d,Full bottles:%d\n", whites, fulls1);
+	printf("From left to right, not filled bottles are:(1~%d)\n",whites);
+	for (int i = 0; i < maxbottle; i++)
+		(emptybottles1[i] == 1) ? printf("%d ", i + 1) : 1;
+	printf("\n");
+	printf("Counted by area minimum height:\n");
+	printf("Bottles:%d,Full bottles:%d\n", whites, fulls2);
+	printf("From left to right, not filled bottles are:(1~%d)\n", whites);
+	for (int i = 0; i < maxbottle; i++)
+		(emptybottles2[i] == 1) ? printf("%d ", i + 1) : 1;
+	printf("\n");
 }
 
 void CommandHandlerImpl::togray()
@@ -225,7 +241,7 @@ void CommandHandlerImpl::togray()
 	{
 		IplImage *p, *q;
 		q = input;
-		p = cvCreateImage(cvSize(input->width, input->height), input->depth, 1);
+		p = cvCreateImage(cvGetSize(input), input->depth, 1);
 		for (int i = 0; i < input->height; i++)
 		{
 			uchar *pixel = (uchar *)(input->imageData + i * input->widthStep);
@@ -308,7 +324,11 @@ void CommandHandlerImpl::count()
 	int llable = 1;
 	uchar *lable = new uchar[ext];
 	int *size = new int[maxbottle];
+	int *low = new int[maxbottle];
+	int *xsum = new int[maxbottle];
 	memset(size, 0, maxbottle * sizeof(int));
+	memset(low, 0, maxbottle * sizeof(int));
+	memset(xsum, 0, maxbottle * sizeof(int));
 	memset(lable, 0, ext * sizeof(uchar));
 	for (int i = 0; i < input->height; i++)
 	{
@@ -317,34 +337,59 @@ void CommandHandlerImpl::count()
 		{
 			if (lable[i * input->height + j] == 0 && pixel[j] == 255)
 			{
-				size[llable] += searchnear(j, i, llable, lable);
+				size[llable - 1] += searchnear(j, i, llable, lable, &low[llable - 1], &xsum[llable - 1]);
 				llable++;
 			}
 		}
 	}
 	whites = llable - 1;
-	fulls = whites;
+	fulls1 = whites;
+	fulls2 = whites;
+	double xaverage[maxbottle];
+	for (int i = 0; i < llable; i++)
+		xaverage[i] = (double)xsum[i] / size[i];
 	for (int i = 0; i < llable; i++)
 		if (size[i] > thresholdwhite)
-			fulls--;
+		{
+			int k = 0;
+			for (int j = 0; j < llable; j++)
+				if (xaverage[i] > xaverage[j]) k++;
+			emptybottles1[k] = 1;
+			fulls1--;
+		}
+	for (int i = 0; i < llable; i++)
+		if (low[i] > thresholdlow)
+		{
+			int k = 0;
+			for (int j = 0; j < llable; j++)
+				if (xaverage[i] > xaverage[j]) k++;
+			emptybottles2[k] = 1;
+			fulls2--;
+		}
+	delete low;
 	delete lable;
 	delete size;
+	delete xsum;
 }
-int CommandHandlerImpl::searchnear(int x, int y, int llable, uchar *lable)
+int CommandHandlerImpl::searchnear(int x, int y, int llable, uchar *lable, int *lower, int *xsum)
 {
 	int sum = 0;
 	if (y >= 0 && y < input->height && x >= 0 && x < input->width && ((uchar *)(input->imageData + y * input->widthStep))[x] == 255 && lable[y*input->height + x] == 0)
 	{
+		if (y > *lower)	*lower = y;
 		lable[y*input->height + x] = llable;
+		*xsum += x;
 		sum++;
-		sum += searchnear(x - 1, y - 1, llable, lable);
-		sum += searchnear(x + 0, y - 1, llable, lable);
-		sum += searchnear(x + 1, y - 1, llable, lable);
-		sum += searchnear(x - 1, y + 0, llable, lable);
-		sum += searchnear(x + 1, y + 0, llable, lable);
-		sum += searchnear(x - 1, y + 1, llable, lable);
-		sum += searchnear(x + 0, y + 1, llable, lable);
-		sum += searchnear(x + 1, y + 1, llable, lable);
+		sum += searchnear(x - 1, y - 1, llable, lable, lower, xsum);
+		sum += searchnear(x + 0, y - 1, llable, lable, lower, xsum);
+		sum += searchnear(x + 1, y - 1, llable, lable, lower, xsum);
+		sum += searchnear(x - 1, y + 0, llable, lable, lower, xsum);
+		sum += searchnear(x + 1, y + 0, llable, lable, lower, xsum);
+		sum += searchnear(x - 1, y + 1, llable, lable, lower, xsum);
+		sum += searchnear(x + 0, y + 1, llable, lable, lower, xsum);
+		sum += searchnear(x + 1, y + 1, llable, lable, lower, xsum);
 	}
 	return sum;
 }
+
+#undef maxbottle
